@@ -37,6 +37,26 @@ def _now() -> float:
     return time.time()
 
 
+class _LazyLock:
+    """第一次 `async with` 时才真正创建 asyncio.Lock（Python 3.9 兼容，见 __init__ 注释）。"""
+
+    __slots__ = ("_lock",)
+
+    def __init__(self) -> None:
+        self._lock: asyncio.Lock | None = None
+
+    def _get(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    async def __aenter__(self) -> None:
+        await self._get().__aenter__()
+
+    async def __aexit__(self, *exc) -> None:
+        await self._get().__aexit__(*exc)
+
+
 @dataclass
 class SessionState:
     avoid_openers: list[str] = field(default_factory=list)
@@ -81,8 +101,11 @@ class RuntimeStateStore:
         self.sessions: dict[str, SessionState] = {}
         # 运行时命令（/humanq off）写入的禁用会话；与配置键 disabled_sessions（静态黑名单）区分，避免同名歧义
         self.runtime_disabled: set[str] = set()
-        self._state_lock = asyncio.Lock()
-        self._write_lock = asyncio.Lock()
+        # ⚠️ 锁要**懒创建**：Python 3.9 里 `asyncio.Lock()` 在没有运行中的事件循环时
+        # （比如单测里刚构造 store）会抛 "There is no current event loop"。
+        # 这两把锁只在 async with 里用，那时一定已经在循环里了。
+        self._state_lock = _LazyLock()
+        self._write_lock = _LazyLock()
         self._generation = 0
         self._saved_generation = 0
         self._save_task: asyncio.Task[None] | None = None
