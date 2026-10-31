@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 单元测试（不需要 nonebot）
+        run: python tests/run_tests.py
+      - name: 冻结评测集门禁（261 例，0 误报 0 漏报）
+        run: python scripts/eval_detector.py --check
